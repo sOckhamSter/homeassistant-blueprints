@@ -1,0 +1,113 @@
+blueprint:
+  name: Randomised Light at Night
+  description: Randomly toggles a light at night within set parameters
+  domain: automation
+  input:
+    target_light:
+      name: Light to toggle
+      description: Which light are we automating?
+      selector:
+        entity:
+          domain:
+            - light
+            - switch
+    override_switch_entity:
+      name: Manual Override Switch
+      description: The Manual Override switch disables ALL automations when on. This automation will only run if Manual Override is off.
+      selector:
+        entity:
+          domain:
+            - input_boolean
+            - switch
+    away_lighting_switch_entity:
+      name: Away Lighting Switch
+      description: This automation will only run if the Away Lighting Switch is on. You could control the status of the Away Lighting switch by another automation based on presence...
+      selector:
+        entity:
+          domain:
+            - input_boolean
+            - switch
+    trigger_minutes:
+      name: Trigger Minutes
+      description: How often should this automation run?
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 120
+          unit_of_measurement: minutes
+    random_delay_max_minutes:
+      name: Random Delay Maximum Minutes
+      description: What is the maximum time limit for the random delay?
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 120
+          unit_of_measurement: minutes
+    lights_out_time:
+      name: Lights Out Time
+      description: What time does this automation stop running? Must be before midnight 23:59:59.
+      selector:
+        time:
+
+mode: single
+max_exceeded: silent
+
+variables:
+  trigger_minutes: !input trigger_minutes
+  random_delay_max_minutes: !input random_delay_max_minutes
+
+trigger:
+  - platform: time_pattern
+    minutes: /1
+
+condition:
+  - condition: template
+    value_template: '{{ now().minute % trigger_minutes == 0 }}'
+  - condition: state
+    entity_id: !input override_switch_entity
+    state: 'off'
+  - condition: state
+    entity_id: !input away_lighting_switch_entity
+    state: 'on'
+  - condition: numeric_state
+    entity_id: sun.sun
+    attribute: elevation
+    below: '-2.0'
+action:
+  - choose:
+      - conditions:
+          - condition: time
+            before: !input lights_out_time
+          - condition: time
+            after: '12:01:00'
+        sequence:
+          - delay:
+              minutes: "{{ range(0,random_delay_max_minutes) | random }}"
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: !input away_lighting_switch_entity
+                    state: 'on'
+                sequence:
+                  - service: homeassistant.toggle
+                    target:
+                      entity_id: !input target_light
+            default: []
+    default:
+      - condition: state
+        entity_id: !input target_light
+        state: 'on'
+      - delay:
+          minutes: "{{ range(0,random_delay_max_minutes) | random }}"
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: !input away_lighting_switch_entity
+                state: 'on'
+            sequence:
+              - service: homeassistant.turn_off
+                target:
+                  entity_id: !input target_light
+        default: []
