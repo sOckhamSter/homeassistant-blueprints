@@ -1,0 +1,93 @@
+blueprint:
+  name: Motion-activated Light with Lux Sensor
+  description: Turn on a light when motion is detected and illuminance is below a given threshold.
+  domain: automation
+  input:
+    motion_entity:
+      name: Motion Sensor
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+          multiple: true
+    light_target:
+      name: Light
+      selector:
+        entity:
+          domain:
+            - light
+            - switch
+          multiple: true
+    override_switch_entity:
+      name: Manual Override Switch
+      description: The Manual Override switch disables ALL automations when on. This automation will only run if Manual Override is off.
+      selector:
+        entity:
+          domain:
+            - input_boolean
+            - switch
+    illuminance_entity:
+      name: Lux Sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+    lux_trigger_value:
+      name: Required Lux Level
+      description: Lux level required by the sensor, below which the automation will run.
+      default: 700
+      selector:
+        number:
+          min: 0
+          max: 60000
+          unit_of_measurement: lx
+    no_motion_wait:
+      name: Wait time
+      description: Time to leave the light on after last motion is detected.
+      default: 120
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: seconds
+
+trigger:
+  - platform: state
+    entity_id: !input motion_entity
+    from: 'off'
+    to: 'on'
+  - platform: state
+    entity_id: !input motion_entity
+    to: 'off'
+    for:
+      seconds: !input no_motion_wait
+condition:
+  - condition: state
+    entity_id: !input override_switch_entity
+    state: 'off'
+  - condition: not
+    conditions:
+    - condition: state
+      entity_id: input_select.home_mode
+      state: Away
+action:
+  - choose:
+    - conditions:
+      - condition: state
+        entity_id: !input motion_entity
+        state: 'on'
+      - condition: numeric_state
+        entity_id: !input illuminance_entity
+        below: !input lux_trigger_value
+      sequence:
+        - service: homeassistant.turn_on
+          target:
+            entity_id: !input light_target
+    - conditions:
+      - condition: state
+        entity_id: !input motion_entity
+        state: 'off'
+      sequence:
+        - service: homeassistant.turn_off
+          target:
+            entity_id: !input light_target
