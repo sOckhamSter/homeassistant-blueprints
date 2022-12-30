@@ -40,14 +40,14 @@ blueprint:
             - input_number
     battery_enable_discharge_switch:
       name: Enable battery discharge switch
-      description: Switch which enables or disables the battery's ability to discharge. When on, discharge is possible. (switch)
+      description: Switch which enables or disables the batterys ability to discharge. When on, discharge is possible. (switch)
       selector:
         entity:
           domain:
             - switch
     battery_mode:
       name: Battery Mode
-      description: The current mode of the battery, so as we know whether it's in eco mode or not (select)
+      description: The current mode of the battery, so as we know whether its in eco mode or not (select)
       selector:
         entity:
           domain:
@@ -100,7 +100,7 @@ action:
               <
               (state_attr(octopus_saving_session_start_time,'timestamp')-(15*60))|int
               }}
-          - alias: We don't have enough battery left (SOC < required power)
+          - alias: We dont have enough battery left (SOC < required power)
             condition: template
             value_template: >-
               {{ states(battery_soc)|int <
