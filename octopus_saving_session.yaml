@@ -1,6 +1,6 @@
 blueprint:
   name: Octopus Saving Session for GivEnergy
-  description: Prevents the battery from discharging if there's not enough remaining charge for a scheduled Saving Session, and enables discharge again before the session begins.
+  description: Prevents the battery from discharging if theres not enough remaining charge for a scheduled Saving Session, and enables discharge again before the session begins.
   domain: automation
   input:
     battery_soc:
