@@ -1,0 +1,458 @@
+blueprint:
+  name: Balance GivEnergy AIO and AC3 Inverters v46
+  description: Balances a GivEnergy All-in-One and an AC3, when the AC3 is connected on the load side of the GivEnergy Gateway.
+  domain: automation
+  input:
+    aio_soc:
+      name: AIO - SOC
+      description: From GivTCP - sensor.givtcp_xxxxxxxxxx_soc
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+    ac3_soc:
+      name: AC3 - SOC
+      description: From GivTCP - sensor.givtcp2_yyyyyyyyyy_soc
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+    evc_power:
+      name: EV Charger - Power
+      description: As reported by your EV charger, must report the unit as watts, not kilowatts
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+    balancer_running_switch:
+      name: Balancer Running toggle helper
+      description: An input_boolean toggle helper you have created which tracks whether this automation is running the balancing right now.
+      selector:
+        entity:
+          domain: input_boolean
+    octopus_intelligent_slot:
+      name: Octopus Intelligent Slot Active
+      description: An input_boolean or binary_sensor which is on if there is an active Octopus Intelligent slot actually charging the car right now. Use binary_sensor.octopus_intelligent_slot from the ha_octopus_intelligent by megakid, or you don't use this create a toggle helper and leave it off.
+      selector:
+        entity:
+          domain:
+            - input_boolean
+            - binary_sensor
+            - switch
+
+variables:
+  aio_soc: !input aio_soc
+  aio_prefix: "{{ aio_soc[6:-4] }}"
+  ac3_soc: !input ac3_soc
+  ac3_prefix: "{{ ac3_soc[6:-4] }}"
+  aio_charge_power: "{{ 'sensor' + aio_prefix +'_charge_power' }}"
+  aio_grid_voltage: "{{ 'sensor' + aio_prefix +'_grid_voltage' }}"
+  aio_battery_power_mode: "{{ 'switch' + aio_prefix +'_battery_power_mode' }}"
+  aio_battery_power: "{{ 'sensor' + aio_prefix +'_battery_power' }}"
+  aio_pv_power: "{{ 'sensor' + aio_prefix +'_pv_power' }}"
+  aio_load_power: "{{ 'sensor' + aio_prefix +'_load_power' }}"
+  aio_battery_power_reserve: "{{ 'number' + aio_prefix +'_battery_power_reserve' }}"
+  ac3_charge_power: "{{ 'sensor' + ac3_prefix +'_charge_power' }}"
+  ac3_battery_power_mode: "{{ 'switch' + ac3_prefix +'_battery_power_mode' }}"
+  ac3_battery_power: "{{ 'sensor' + ac3_prefix +'_battery_power' }}"
+  ac3_inverter_power: "{{ 'sensor' + ac3_prefix +'_invertor_power' }}"
+  ac3_battery_power_reserve: "{{ 'number' + ac3_prefix +'_battery_power_reserve' }}"
+  combined_load: "{{ ( states(aio_load_power) | float(0)) + ( states(ac3_inverter_power) | float(0))}}"
+
+trigger_variables:
+  trigger_aio_soc: !input aio_soc
+  trigger_aio_prefix: "{{ trigger_aio_soc[6:-4] }}"
+  trigger_ac3_soc: !input ac3_soc
+  trigger_ac3_prefix: "{{ trigger_ac3_soc[6:-4] }}"
+  trigger_aio_battery_power: "{{ 'sensor' + trigger_aio_prefix +'_battery_power' }}"
+  trigger_ac3_battery_power: "{{ 'sensor' + trigger_ac3_prefix +'_battery_power' }}"
+  trigger_aio_grid_voltage: "{{ 'sensor' + trigger_aio_prefix +'_grid_voltage' }}"
+
+trigger:
+  - platform: template
+    value_template: |-
+      {{ (states(trigger_aio_battery_power)|int  < -100 and states(trigger_ac3_battery_power)|int > 100) or
+      (states(trigger_ac3_battery_power)|int  < -100 and states(trigger_aio_battery_power)|int > 100) }}
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 30
+    id: "crosscharging"
+  - platform: time_pattern
+    minutes: /5
+    id: "time_trigger"
+  - platform: template
+    value_template: "{{ states(trigger_aio_grid_voltage)|float(0) < 100 }}"
+    id: "grid_failure"
+
+condition: []
+
+action:
+  - if:
+      - condition: trigger
+        id:
+          - crosscharging
+          - time_trigger
+      - condition: state
+        entity_id: !input balancer_running_switch
+        state: "off"
+        alias: "Make sure that the balancer is not already running"
+      - condition: not
+        conditions:
+          - condition: and
+            conditions:
+              - condition: state
+                entity_id: !input octopus_intelligent_slot
+                state: "on"
+              - condition: template
+                value_template: "{{ states(aio_charge_power)|float(0) > 250 }}"
+              - condition: template
+                value_template: "{{ states(ac3_charge_power)|float(0) > 250 }}"
+        alias: >-
+          Ensure balancer doesn't run if IO slot charging. But can run if IO is on, but finished charging
+        enabled: true
+      - condition: template
+        value_template: "{{ states(aio_grid_voltage)|float(0) > 100 }}"
+        alias: Test for OnGrid
+      - condition: and
+        conditions:
+          - condition: template
+            value_template: >-
+                {{ (states(aio_soc)|int(0) > states(aio_battery_power_reserve)|int(0)) and (states(aio_soc)|int(0) < 101) }}
+          - condition: template
+            value_template: >-
+                {{ (states(ac3_soc)|int(0) > states(ac3_battery_power_reserve)|int(0)) and (states(ac3_soc)|int(0) < 101) }}
+        alias: Check Both AC3 & AIO are between reserved power %age & 100%
+      - condition: not
+        conditions:
+          - condition: numeric_state
+            entity_id: !input evc_power
+            above: 2500
+        alias: Check if EV charger is over 2.5kw
+    then:
+      - repeat:
+          until:
+            - condition: state
+              entity_id: !input balancer_running_switch
+              state: "on"
+          sequence:
+            - service: input_boolean.turn_on
+              data: {}
+              target:
+                entity_id: !input balancer_running_switch
+        alias: Turn On Balancer toggle
+      - choose:
+          - conditions:
+              - condition: numeric_state
+                entity_id: !input ac3_soc
+                above: !input aio_soc
+              - condition: trigger
+                id:
+                  - time_trigger
+            sequence:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: >-
+                          {{ states(aio_pv_power)|float(0) > combined_load|float(0) }}
+                    sequence:
+                      - service: switch.turn_off
+                        data: {}
+                        target:
+                          entity_id: '{{ ac3_battery_power_mode }}'
+                      - alias: If power demand is more than the AIO can cope with on its own then abandon the balancing
+                        repeat:
+                            while:
+                                - alias: Is power demand < 6kW?
+                                  condition: template
+                                  value_template: >-
+                                    {{ (( combined_load | float(0)) - ( states(aio_pv_power) | float(0))) | round(0) < 6000 }}
+                                # Don't do it too many times
+                                - condition: template
+                                  value_template: "{{ repeat.index <= 9 }}"
+                            sequence:
+                              - delay:
+                                  hours: 0
+                                  minutes: 0
+                                  seconds: 10
+                                  milliseconds: 0
+                      - service: switch.turn_on
+                        data: {}
+                        target:
+                          entity_id: '{{ ac3_battery_power_mode }}'
+                  - conditions:
+                      - condition: template
+                        value_template: >-
+                          {{ states(aio_pv_power)|float(0) < combined_load|float(0) }}
+                      - condition: template
+                        value_template: >
+                          {{ (( combined_load | float(0)) - ( states(aio_pv_power) | float(0))) | round(0) < 3000}}
+                        alias: Check Load with PV support is under 3000
+                    sequence:
+                      - service: switch.turn_off
+                        data: {}
+                        target:
+                          entity_id: '{{ aio_battery_power_mode }}'
+                      - alias: If power demand is more than the AC3 can cope with on its own then abandon the balancing
+                        repeat:
+                            while:
+                                - alias: Is power demand < 3kW?
+                                  condition: template
+                                  value_template: >-
+                                    {{ (( combined_load | float(0)) - ( states(aio_pv_power) | float(0))) | round(0) < 3000 }}
+                                # Don't do it too many times
+                                - condition: template
+                                  value_template: "{{ repeat.index <= 9 }}"
+                            sequence:
+                              - delay:
+                                  hours: 0
+                                  minutes: 0
+                                  seconds: 10
+                                  milliseconds: 0
+                      - service: switch.turn_on
+                        data: {}
+                        target:
+                          entity_id: '{{ aio_battery_power_mode }}'
+          - conditions:
+              - condition: numeric_state
+                entity_id: !input ac3_soc
+                below: !input aio_soc
+              - condition: trigger
+                id:
+                  - time_trigger
+            sequence:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: >-
+                          {{ states(aio_pv_power)|float(0) > combined_load|float(0) }}
+                      - condition: template
+                        value_template: >-
+                          {{ (states(aio_pv_power) | float(0)) - ( combined_load | float(0)) | round(0) < 3000 }}
+                        alias: Check surplus PV < 3000W
+                    sequence:
+                      - service: switch.turn_off
+                        data: {}
+                        target:
+                          entity_id: '{{ aio_battery_power_mode }}'
+                      - alias: If power demand is more than the AC3 can cope with on its own then abandon the balancing
+                        repeat:
+                            while:
+                                - alias: Is power demand < 3kW?
+                                  condition: template
+                                  value_template: >-
+                                    {{ (( combined_load | float(0)) - ( states(aio_pv_power) | float(0))) | round(0) < 3000 }}
+                                # Don't do it too many times
+                                - condition: template
+                                  value_template: "{{ repeat.index <= 9 }}"
+                            sequence:
+                              - delay:
+                                  hours: 0
+                                  minutes: 0
+                                  seconds: 10
+                                  milliseconds: 0
+                      - service: switch.turn_on
+                        data: {}
+                        target:
+                          entity_id: '{{ aio_battery_power_mode }}'
+                  - conditions:
+                      - condition: template
+                        value_template: >-
+                          {{ states(aio_pv_power)|float(0) < combined_load|float(0) }}
+                      - condition: template
+                        value_template: >-
+                          {{ combined_load|float(0) < 5500 }}
+                    sequence:
+                      - service: switch.turn_off
+                        data: {}
+                        target:
+                          entity_id: '{{ ac3_battery_power_mode }}'
+                      - alias: If power demand is more than the AIO can cope with on its own then abandon the balancing
+                        repeat:
+                            while:
+                                - alias: Is power demand < 6kW?
+                                  condition: template
+                                  value_template: >-
+                                    {{ (( combined_load | float(0)) - ( states(aio_pv_power) | float(0))) | round(0) < 6000 }}
+                                # Don't do it too many times
+                                - condition: template
+                                  value_template: "{{ repeat.index <= 9 }}"
+                            sequence:
+                              - delay:
+                                  hours: 0
+                                  minutes: 0
+                                  seconds: 10
+                                  milliseconds: 0
+                      - service: switch.turn_on
+                        data: {}
+                        target:
+                          entity_id: '{{ ac3_battery_power_mode }}'
+                  - conditions:
+                      - condition: template
+                        value_template: >-
+                          {{ states(aio_pv_power)|float(0) > combined_load|float(0) }}
+                      - condition: template
+                        value_template: >-
+                          {{ (( states(aio_pv_power) | float(0)) - ( combined_load | float(0))) | round(0) > 3000}}
+                        alias: Check surplus PV > 3000W
+                    sequence:
+                      - service: switch.turn_off
+                        data: {}
+                        target:
+                          entity_id: '{{ ac3_battery_power_mode }}'
+                      - delay:
+                          hours: 0
+                          minutes: 0
+                          seconds: 90
+                          milliseconds: 0
+                      - service: switch.turn_on
+                        data: {}
+                        target:
+                          entity_id: '{{ ac3_battery_power_mode }}'
+        alias: 2 choices of operation for balancing
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 2
+          milliseconds: 0
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: |-
+                  {{ states(ac3_battery_power)|int  < -100 and states(aio_battery_power)|int > 100 }}
+                alias: AIO is discharging into AC3
+              - condition: template
+                value_template: >-
+                  {{ (( combined_load | float(0)) - ( states(aio_pv_power) | float(0))) | round(0) < 3000}}
+                alias: Check Load with PV support is under 3000
+            sequence:
+              - if:
+                  - condition: template
+                    value_template: >-
+                      {{ (( combined_load | float(0)) - ( states(aio_pv_power) | float(0))) | round(0) < 3000}}
+                    alias: If Load with PV support is under 3000w then we can pause the AIO because the AC3 can take it
+                then:
+                  - service: switch.turn_off
+                    data: {}
+                    target:
+                      entity_id: '{{ aio_battery_power_mode }}'
+                  - delay:
+                      hours: 0
+                      minutes: 0
+                      seconds: 15
+                      milliseconds: 0
+                  - service: switch.turn_on
+                    data: {}
+                    target:
+                      entity_id: '{{ aio_battery_power_mode }}'
+                else:
+                  - service: switch.turn_off
+                    data: {}
+                    target:
+                      entity_id: '{{ ac3_battery_power_mode }}'
+                    alias: Otherwise we pause the AC3 because it has run away cross charging and we need too much power for it to handle
+                  - delay:
+                      hours: 0
+                      minutes: 0
+                      seconds: 15
+                      milliseconds: 0
+                  - service: switch.turn_on
+                    data: {}
+                    target:
+                      entity_id: '{{ ac3_battery_power_mode }}'
+          - conditions:
+              - condition: template
+                value_template: |-
+                  {{ states(aio_battery_power)|int  < -100 and states(ac3_battery_power)|int > 100 }}
+                alias: AC3 is discharging into AIO
+            sequence:
+              - service: switch.turn_off
+                data: {}
+                target:
+                  entity_id: '{{ ac3_battery_power_mode }}'
+              - delay:
+                  hours: 0
+                  minutes: 0
+                  seconds: 15
+                  milliseconds: 0
+              - service: switch.turn_on
+                data: {}
+                target:
+                  entity_id: '{{ ac3_battery_power_mode }}'
+        alias: Check for and deal with cross-charging
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 10
+          milliseconds: 0
+      - if:
+          - condition: template
+            value_template: "{{ is_state(ac3_battery_power_mode, 'off') }}"
+            alias: Ensure PauseMode is reset to Disabled
+        then:
+          - service: switch.turn_on
+            data: {}
+            target:
+              entity_id: '{{ ac3_battery_power_mode }}'
+          - delay:
+              hours: 0
+              minutes: 0
+              seconds: 10
+              milliseconds: 0
+        alias: Ensure AC3 PauseMode is reset to Disabled
+      - if:
+          - condition: template
+            value_template: "{{ is_state(aio_battery_power_mode, 'off') }}"
+        then:
+          - service: switch.turn_on
+            data: {}
+            target:
+              entity_id: '{{ aio_battery_power_mode }}'
+        alias: Ensure AIO PauseMode is reset to Disabled
+      - repeat:
+          until:
+            - condition: state
+              entity_id: !input balancer_running_switch
+              state: "off"
+          sequence:
+            - service: input_boolean.turn_off
+              data: {}
+              target:
+                entity_id: !input balancer_running_switch
+        alias: Turn Balancer Toggle Off
+    alias: If balancing needs to be executed, either from a time event or cross-charge detection
+
+  - if:
+      - condition: trigger
+        id:
+          - grid_failure
+    then:
+      - if:
+          - condition: state
+            entity_id: !input balancer_running_switch
+            state: "on"
+            alias: >-
+              If the balancer is already running, wait 2 minutes for it to
+              finish
+        then:
+          - delay:
+              hours: 0
+              minutes: 2
+              seconds: 0
+              milliseconds: 0
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 30
+          milliseconds: 0
+        alias: Wait 30 seconds in case the voltage drop was a blip
+      - if:
+          - condition: template
+            value_template: "{{ states(aio_grid_voltage)|float(0) < 100 }}"
+        then:
+          - service: switch.turn_off
+            data: {}
+            target:
+              entity_id: '{{ ac3_battery_power_mode }}'
+    alias: "Grid failure detected. Pause a bit, if it's still down then pause the AC3 for now. It'll resume when balancing resumes."
+mode: parallel
