@@ -1,6 +1,6 @@
 blueprint:
   name: Balance GivEnergy AIO and AC3 Inverters
-  description: Balances a GivEnergy All-in-One and an AC3, when the AC3 is connected on the load side of the GivEnergy Gateway.
+  description: Balances a GivEnergy All-in-One and an AC3, when the AC3 is connected on the load side of the GivEnergy Gateway. This update 2023-10-17 (v48).
   domain: automation
   input:
     aio_soc:
