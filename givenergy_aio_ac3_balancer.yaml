@@ -39,6 +39,24 @@ blueprint:
             - input_boolean
             - binary_sensor
             - switch
+    crosscharge_threshold_aio_to_ac3:
+      name: Crosscharge threshold - AIO to AC3
+      description: Threshold for the cross charging prevention to activate when AIO is discharging into the AC3
+      default: 100
+      selector:
+        number:
+          min: 10
+          max: 1000
+          unit_of_measurement: watts
+    crosscharge_threshold_ac3_to_aio:
+      name: Crosscharge threshold - AC3 to AIO
+      description: Threshold for the cross charging prevention to activate when AC3 is discharging into the AIO
+      default: 100
+      selector:
+        number:
+          min: 10
+          max: 1000
+          unit_of_measurement: watts
 
 variables:
   aio_soc: !input aio_soc
@@ -58,6 +76,8 @@ variables:
   ac3_inverter_power: "{{ 'sensor' + ac3_prefix +'_invertor_power' }}"
   ac3_battery_power_reserve: "{{ 'number' + ac3_prefix +'_battery_power_reserve' }}"
   combined_load: "{{ ( states(aio_load_power) | float(0)) + ( states(ac3_inverter_power) | float(0))}}"
+  crosscharge_threshold_aio_to_ac3: !input crosscharge_threshold_aio_to_ac3
+  crosscharge_threshold_ac3_to_aio: !input crosscharge_threshold_ac3_to_aio
 
 trigger_variables:
   trigger_aio_soc: !input aio_soc
@@ -67,12 +87,14 @@ trigger_variables:
   trigger_aio_battery_power: "{{ 'sensor' + trigger_aio_prefix +'_battery_power' }}"
   trigger_ac3_battery_power: "{{ 'sensor' + trigger_ac3_prefix +'_battery_power' }}"
   trigger_aio_grid_voltage: "{{ 'sensor' + trigger_aio_prefix +'_grid_voltage' }}"
+  trigger_crosscharge_threshold_aio_to_ac3: !input crosscharge_threshold_aio_to_ac3
+  trigger_crosscharge_threshold_ac3_to_aio: !input crosscharge_threshold_ac3_to_aio
 
 trigger:
   - platform: template
     value_template: |-
-      {{ (states(trigger_aio_battery_power)|int  < -100 and states(trigger_ac3_battery_power)|int > 100) or
-      (states(trigger_ac3_battery_power)|int  < -100 and states(trigger_aio_battery_power)|int > 100) }}
+      {{ (states(trigger_aio_battery_power)|int  < (trigger_crosscharge_threshold_ac3_to_aio*-1) and states(trigger_ac3_battery_power)|int > trigger_crosscharge_threshold_ac3_to_aio) or
+      (states(trigger_ac3_battery_power)|int  < (trigger_crosscharge_threshold_aio_to_ac3*-1) and states(trigger_aio_battery_power)|int > trigger_crosscharge_threshold_aio_to_ac3) }}
     for:
       hours: 0
       minutes: 0
@@ -319,18 +341,14 @@ action:
           - conditions:
               - condition: template
                 value_template: |-
-                  {{ states(ac3_battery_power)|int  < -100 and states(aio_battery_power)|int > 100 }}
+                  {{ states(ac3_battery_power)|int  < (crosscharge_threshold_aio_to_ac3*-1) and states(aio_battery_power)|int > crosscharge_threshold_aio_to_ac3 }}
                 alias: AIO is discharging into AC3
-              - condition: template
-                value_template: >-
-                  {{ (( combined_load | float(0)) - ( states(aio_pv_power) | float(0))) | round(0) < 3000}}
-                alias: Check Load with PV support is under 3000
             sequence:
               - if:
                   - condition: template
                     value_template: >-
-                      {{ (( combined_load | float(0)) - ( states(aio_pv_power) | float(0))) | round(0) < 3000}}
-                    alias: If Load with PV support is under 3000w then we can pause the AIO because the AC3 can take it
+                      {{ (states(aio_pv_power) | float(0)) > ( combined_load | float(0)) }}
+                    alias: If PV Power is more than combined load, we are charging from solar and must pause the AIO. Otherwise we must pause to the AC3.
                 then:
                   - service: switch.turn_off
                     data: {}
@@ -350,7 +368,6 @@ action:
                     data: {}
                     target:
                       entity_id: '{{ ac3_battery_power_mode }}'
-                    alias: Otherwise we pause the AC3 because it has run away cross charging and we need too much power for it to handle
                   - delay:
                       hours: 0
                       minutes: 0
@@ -363,22 +380,42 @@ action:
           - conditions:
               - condition: template
                 value_template: |-
-                  {{ states(aio_battery_power)|int  < -100 and states(ac3_battery_power)|int > 100 }}
+                  {{ states(aio_battery_power)|int  < (crosscharge_threshold_ac3_to_aio*-1) and states(ac3_battery_power)|int > crosscharge_threshold_ac3_to_aio }}
                 alias: AC3 is discharging into AIO
             sequence:
-              - service: switch.turn_off
-                data: {}
-                target:
-                  entity_id: '{{ ac3_battery_power_mode }}'
-              - delay:
-                  hours: 0
-                  minutes: 0
-                  seconds: 15
-                  milliseconds: 0
-              - service: switch.turn_on
-                data: {}
-                target:
-                  entity_id: '{{ ac3_battery_power_mode }}'
+              - if:
+                  - condition: template
+                    value_template: >-
+                      {{ (states(aio_pv_power) | float(0)) > ( combined_load | float(0)) }}
+                    alias: If PV Power is more than combined load, we are charging from solar and must pause the AC3. Otherwise we must pause to the AIO.
+                then:
+                  - service: switch.turn_off
+                    data: {}
+                    target:
+                      entity_id: '{{ ac3_battery_power_mode }}'
+                  - delay:
+                      hours: 0
+                      minutes: 0
+                      seconds: 15
+                      milliseconds: 0
+                  - service: switch.turn_on
+                    data: {}
+                    target:
+                      entity_id: '{{ ac3_battery_power_mode }}'
+                else:
+                  - service: switch.turn_off
+                    data: {}
+                    target:
+                      entity_id: '{{ aio_battery_power_mode }}'
+                  - delay:
+                      hours: 0
+                      minutes: 0
+                      seconds: 15
+                      milliseconds: 0
+                  - service: switch.turn_on
+                    data: {}
+                    target:
+                      entity_id: '{{ aio_battery_power_mode }}'
         alias: Check for and deal with cross-charging
       - delay:
           hours: 0
