@@ -1,16 +1,8 @@
 blueprint:
   name: GivEnergy and DFS Exporter 2023-2024
-  description: Sets a forced export on a GivEnergy inverter for up to two hours at a given power output. Create one automation per inverter. This update 2023-11-16 (v03).
+  description: Sets a forced export on a GivEnergy inverter for up to two hours at a given power output. Create one automation per inverter. This update 2023-11-17 (v04).
   domain: automation
   input:
-    dfs_date:
-      name: DFS Date
-      description: Create a date-only helper to contain the date of the saving session. The automation will only run on this date.
-      selector:
-        entity:
-          domain:
-          - input_datetime
-          multiple: false
     dfs_start_time:
       name: DFS Start Time
       description: Create a time-only helper to contain the start time of the DFS Session
@@ -60,7 +52,6 @@ blueprint:
           unit_of_measurement: seconds
           mode: slider
 variables:
-  dfs_date: !input dfs_date
   dfs_start_time: !input dfs_start_time
   dfs_end_time: !input dfs_end_time
   discharge_power: !input discharge_power
@@ -82,10 +73,7 @@ trigger:
 - platform: time
   at: !input dfs_end_time
   id: finish
-condition:
-- alias: Only execute this automation on the saving session day
-  condition: template
-  value_template: '{{ (now().date() + timedelta(days=0)) | string == states(dfs_date) }}'
+condition: []
 action:
 - choose:
   - conditions:
