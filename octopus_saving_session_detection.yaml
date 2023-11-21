@@ -1,8 +1,24 @@
 blueprint:
   name: Octopus Saving Session Detection
-  description: Detects an upcoming OPTED-IN saving session, sets start and end time entities, and enables your session export automation. Will also disable your automation at the end of the session too. You must have the Octopus Energy integration installed and working already. This version 2023-11-17 v02
+  description: Detects an upcoming OPTED-IN saving session, sets start and end time entities, and enables your session export automation. Will also disable your automation at the end of the session too. You must have the Octopus Energy integration installed and working already. This version 2023-11-21 v03
   domain: automation
   input:
+    octopus_saving_sessions_entity:
+      name: Octopus Energy Saving Sessions Binary Sensor Entity
+      description: From the Octopus Energy integration - binary_sensor.octopus_energy_a_xxxxxxxx_octoplus_saving_sessions
+      selector:
+        entity:
+          domain:
+          - binary_sensor
+          multiple: false
+    octopus_saving_session_event_entity:
+      name: Octoplus Saving Session Events Events Entity
+      description: From the Octopus Energy integration - event.octopus_energy_a_xxxxxxxx_octoplus_saving_session_events
+      selector:
+        entity:
+          domain:
+          - event
+          multiple: false
     dfs_start_time:
       name: Session Start Time Entity
       description: Create a time-only helper to contain the start time of the Saving Session
@@ -31,89 +47,117 @@ blueprint:
 variables:
   dfs_start_time: !input dfs_start_time
   dfs_end_time: !input dfs_end_time
+  octopus_saving_sessions_entity: !input octopus_saving_sessions_entity
+  octopus_saving_session_event_entity: !input octopus_saving_session_event_entity
+
 trigger_variables:
   trigger_dfs_end_time: !input dfs_end_time
 trigger:
+  - alias: New Session - triggers on new saving session event
+    platform: event
+    event_type: octopus_energy_new_octoplus_saving_session
+    id: New_Session
   - alias: >-
-      triggers when any of the three entity attributes change and also every
-      thirty minutes
+      Joined Session - triggers when any of the three entity attributes change
+      and also every thirty minutes
     platform: state
     entity_id:
-      - binary_sensor.octopus_energy_saving_sessions
+      - !input octopus_saving_sessions_entity
     attribute: next_joined_event_start
-    id: start
+    id: Joined_Session
   - platform: state
     entity_id:
-      - binary_sensor.octopus_energy_saving_sessions
+      - !input octopus_saving_sessions_entity
     attribute: next_joined_event_end
-    id: start
+    id: Joined_Session
   - platform: state
     entity_id:
-      - binary_sensor.octopus_energy_saving_sessions
+      - !input octopus_saving_sessions_entity
     attribute: next_joined_event_duration_in_minutes
-    id: start
+    id: Joined_Session
   - platform: time_pattern
     minutes: /30
-    id: start
-  - platform: time
+    id: Joined_Session
+  - alias: End of session - activites required after session has finished
+    platform: time
     at: !input dfs_end_time
-    id: finish
+    id: Finished_Session
 condition:
-  - alias: >-
-      checks that all 3 entity attributes are not null and validates the data by
-      calculating that the duration is equal to the difference between the start
-      time and the end time and also that the start time is within the next 24
-      hours
-    and:
-      - not:
-          - condition: state
-            entity_id:
-              - binary_sensor.octopus_energy_saving_sessions
-            attribute: next_joined_event_start
-            state: null
-      - not:
-          - condition: state
-            entity_id:
-              - binary_sensor.octopus_energy_saving_sessions
-            attribute: next_joined_event_end
-            state: null
-      - not:
-          - condition: state
-            entity_id:
-              - binary_sensor.octopus_energy_saving_sessions
-            attribute: next_joined_event_duration_in_minutes
-            state: null
-      - condition: template
-        value_template: >-
-          {{
-          ((state_attr('binary_sensor.octopus_energy_saving_sessions','next_joined_event_end')|as_local
-          -
-          state_attr('binary_sensor.octopus_energy_saving_sessions','next_joined_event_start')|as_local).total_seconds()
-          / 60) ==
-          state_attr('binary_sensor.octopus_energy_saving_sessions','next_joined_event_duration_in_minutes')
-          }}                   
-      - condition: template
-        value_template: >-
-          {{
-          (((state_attr('binary_sensor.octopus_energy_saving_sessions','next_joined_event_start')|as_local
-          - now()).total_seconds()) / 60) < (24 * 60) }}
-      - condition: template
-        value_template: >-
-          {{
-          (((state_attr('binary_sensor.octopus_energy_saving_sessions','next_joined_event_start')|as_local
-          - now()).total_seconds()) / 60) > 0 }}               
+  - or:
+      - alias: New Session - no further conditions
+        condition: trigger
+        id: New_Session
+      - and:
+          - alias: >-
+              Joined Session - checks that all 3 entity attributes are not null
+              and validates the data by calculating that the duration is equal
+              to the difference between the start time and the end time and also
+              that the start time is within the next 24 hours
+            condition: trigger
+            id: Joined_Session
+          - not:
+              - condition: state
+                entity_id: !input octopus_saving_sessions_entity
+                attribute: next_joined_event_start
+                state: null
+          - not:
+              - condition: state
+                entity_id: !input octopus_saving_sessions_entity
+                attribute: next_joined_event_end
+                state: null
+          - not:
+              - condition: state
+                entity_id: !input octopus_saving_sessions_entity
+                attribute: next_joined_event_duration_in_minutes
+                state: null
+          - condition: template
+            value_template: >-
+              {{
+              ((state_attr(octopus_saving_sessions_entity,'next_joined_event_end')|as_local
+              -
+              state_attr(octopus_saving_sessions_entity,'next_joined_event_start')|as_local).total_seconds()
+              / 60) ==
+              state_attr(octopus_saving_sessions_entity,'next_joined_event_duration_in_minutes')
+              }}
+          - condition: template
+            value_template: >-
+              {{
+              (((state_attr(octopus_saving_sessions_entity,'next_joined_event_start')|as_local
+              - now()).total_seconds()) / 60) < (24 * 60)  }}
+          - condition: template
+            value_template: >-
+              {{
+              (((state_attr(octopus_saving_sessions_entity,'next_joined_event_start')|as_local
+              - now()).total_seconds()) / 60) > 0  }}
 action:
   - choose:
       - conditions:
           - condition: trigger
+            id: New_Session
+        sequence:
+          - service: octopus_energy.join_octoplus_saving_session_event
+            data:
+              event_code: trigger.event.data["event_code"]
+            target:
+              entity_id: !input octopus_saving_session_event_entity
+          - service: persistent_notification.create
+            data:
+              title: Saving Sessions Updated
+              message: >-
+                Joined new Octopus Energy saving session. It starts at {{
+                trigger.event.data["event_start"].strftime('%H:%M') }} on {{
+                trigger.event.data["event_start"].day }}/{{
+                trigger.event.data["event_start"].month }}
+      - conditions:
+          - condition: trigger
             id:
-              - start
+              - Joined_Session
         sequence:
           - service: input_datetime.set_datetime
             data:
               datetime: >-
                 {{
-                state_attr('binary_sensor.octopus_energy_saving_sessions','next_joined_event_start')
+                state_attr(octopus_saving_sessions_entity,'next_joined_event_start')
                 }}
             target:
               entity_id: !input dfs_start_time
@@ -121,7 +165,7 @@ action:
             data:
               datetime: >-
                 {{
-                state_attr('binary_sensor.octopus_energy_saving_sessions','next_joined_event_end')
+                state_attr(octopus_saving_sessions_entity,'next_joined_event_end')
                 }}
             target:
               entity_id: !input dfs_end_time
@@ -132,7 +176,7 @@ action:
       - conditions:
           - condition: trigger
             id:
-              - finish
+              - Finished_Session
         sequence:
           - delay:
               hours: 0
