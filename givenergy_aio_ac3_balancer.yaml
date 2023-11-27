@@ -1,6 +1,6 @@
 blueprint:
   name: Balance GivEnergy AIO and AC3 Inverters
-  description: Balances a GivEnergy All-in-One and an AC3, when the AC3 is connected on the load side of the GivEnergy Gateway. This update 2023-10-17 (v48).
+  description: Balances a GivEnergy All-in-One and an AC3, when the AC3 is connected on the load side of the GivEnergy Gateway. This update 2023-11-26 (v49).
   domain: automation
   input:
     aio_soc:
@@ -106,6 +106,9 @@ trigger:
   - platform: template
     value_template: "{{ states(trigger_aio_grid_voltage)|float(0) < 100 }}"
     id: "grid_failure"
+  - platform: homeassistant
+    event: start
+    id: startup
 
 condition: []
 
@@ -492,4 +495,28 @@ action:
             target:
               entity_id: '{{ ac3_battery_power_mode }}'
     alias: "Grid failure detected. Pause a bit, if it's still down then pause the AC3 for now. It'll resume when balancing resumes."
+
+  - if:
+      - condition: trigger
+        id:
+          - startup
+    then:
+      - delay:
+          hours: 0
+          minutes: 1
+          seconds: 0
+          milliseconds: 0
+        alias: Wait a bit until HA has finished booting
+      - repeat:
+          until:
+            - condition: state
+              entity_id: !input balancer_running_switch
+              state: "off"
+          sequence:
+            - service: input_boolean.turn_off
+              data: {}
+              target:
+                entity_id: !input balancer_running_switch
+        alias: Turn Balancer Toggle Off
+    alias: "Home Assistant has booted. Need to make sure the Balancer Running toggle is off"
 mode: parallel
