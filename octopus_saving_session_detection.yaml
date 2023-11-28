@@ -137,7 +137,7 @@ action:
         sequence:
           - service: octopus_energy.join_octoplus_saving_session_event
             data:
-              event_code: trigger.event.data["event_code"]
+              event_code: '{{ trigger.event.data["event_code"] }}'
             target:
               entity_id: !input octopus_saving_session_event_entity
           - service: persistent_notification.create
