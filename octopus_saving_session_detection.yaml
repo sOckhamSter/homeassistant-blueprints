@@ -1,6 +1,6 @@
 blueprint:
   name: Octopus Saving Session Detection
-  description: Detects an upcoming OPTED-IN saving session, sets start and end time entities, and enables your session export automation. Will also disable your automation at the end of the session too. You must have the Octopus Energy integration installed and working already. This version 2023-11-29 v04
+  description: Detects an upcoming OPTED-IN saving session, sets start and end time entities, and enables your session export automation. Will also disable your automation at the end of the session too. You must have the Octopus Energy integration installed and working already. This version 2023-11-29 v04.01
   domain: automation
   input:
     octopus_saving_sessions_entity:
@@ -87,6 +87,9 @@ condition:
       - alias: New Session - no further conditions
         condition: trigger
         id: New_Session
+      - alias: Finished Session - no further conditions
+        condition: trigger
+        id: Finished_Session
       - and:
           - alias: >-
               Joined Session - checks that all 3 entity attributes are not null
