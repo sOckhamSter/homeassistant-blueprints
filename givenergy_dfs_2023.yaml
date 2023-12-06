@@ -1,6 +1,6 @@
 blueprint:
   name: GivEnergy and DFS Exporter 2023-2024
-  description: Sets a forced export on a GivEnergy inverter for up to two hours at a given power output. Create one automation per inverter. This update 2023-11-17 (v04).
+  description: Sets a forced export on a GivEnergy inverter for up to two hours at a given power output. Create one automation per inverter. This update 2023-12-06 (v05).
   domain: automation
   input:
     dfs_start_time:
@@ -60,7 +60,7 @@ variables:
   inverter_force_export: '{{ ''select'' + inverter_prefix +''_force_export'' }}'
   inverter_mode: '{{ ''select'' + inverter_prefix +''_mode'' }}'
   inverter_discharge_rate: '{{ ''number'' + inverter_prefix +''_battery_discharge_rate'' }}'
-  inverter_max_rate: '{{ ''sensor'' + inverter_prefix +''_invertor_max_inv_rate'' }}'
+  inverter_max_rate: '{{ ''sensor'' + inverter_prefix +''_invertor_max_bat_rate'' }}'
   delay_offset_seconds: !input delay_offset_seconds
   enable_discharge: '{{ ''switch'' + inverter_prefix +''_enable_discharge'' }}'
 trigger_variables:
