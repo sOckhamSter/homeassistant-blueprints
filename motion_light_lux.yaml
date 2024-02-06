@@ -8,7 +8,6 @@ blueprint:
       selector:
         entity:
           domain: binary_sensor
-          device_class: motion
           multiple: true
     light_target:
       name: Light
