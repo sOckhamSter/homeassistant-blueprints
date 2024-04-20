@@ -11,14 +11,6 @@ blueprint:
           domain:
             - light
             - switch
-    override_switch_entity:
-      name: Manual Override Switch
-      description: The Manual Override switch disables ALL automations when on. This automation will only run if Manual Override is off.
-      selector:
-        entity:
-          domain:
-            - input_boolean
-            - switch
     away_lighting_switch_entity:
       name: Away Lighting Switch
       description: This automation will only run if the Away Lighting Switch is on. You could control the status of the Away Lighting switch by another automation based on presence...
@@ -65,9 +57,6 @@ trigger:
 condition:
   - condition: template
     value_template: '{{ now().minute % trigger_minutes == 0 }}'
-  - condition: state
-    entity_id: !input override_switch_entity
-    state: 'off'
   - condition: state
     entity_id: !input away_lighting_switch_entity
     state: 'on'
