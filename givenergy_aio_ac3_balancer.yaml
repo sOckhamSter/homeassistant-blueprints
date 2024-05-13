@@ -1,6 +1,6 @@
 blueprint:
   name: Balance GivEnergy AIO and AC3 Inverters
-  description: Balances a GivEnergy All-in-One and an AC3, when the AC3 is connected on the load side of the GivEnergy Gateway. This update 2023-11-26 (v49).
+  description: Balances a GivEnergy All-in-One and an AC3, when the AC3 is connected on the load side of the GivEnergy Gateway. This update 2024-05-13 (v51).
   domain: automation
   input:
     aio_soc:
@@ -75,9 +75,11 @@ variables:
   ac3_battery_power: "{{ 'sensor' + ac3_prefix +'_battery_power' }}"
   ac3_inverter_power: "{{ 'sensor' + ac3_prefix +'_invertor_power' }}"
   ac3_battery_power_reserve: "{{ 'number' + ac3_prefix +'_battery_power_reserve' }}"
+  ac3_enable_charge_schedule: "{{ 'switch' + ac3_prefix +'_enable_charge_schedule' }}"
   combined_load: "{{ ( states(aio_load_power) | float(0)) + ( states(ac3_inverter_power) | float(0))}}"
   crosscharge_threshold_aio_to_ac3: !input crosscharge_threshold_aio_to_ac3
   crosscharge_threshold_ac3_to_aio: !input crosscharge_threshold_ac3_to_aio
+  aio_grid_frequency: "{{ 'sensor' + aio_prefix +'_grid_frequency' }}"
 
 trigger_variables:
   trigger_aio_soc: !input aio_soc
@@ -87,6 +89,7 @@ trigger_variables:
   trigger_aio_battery_power: "{{ 'sensor' + trigger_aio_prefix +'_battery_power' }}"
   trigger_ac3_battery_power: "{{ 'sensor' + trigger_ac3_prefix +'_battery_power' }}"
   trigger_aio_grid_voltage: "{{ 'sensor' + trigger_aio_prefix +'_grid_voltage' }}"
+  trigger_aio_grid_frequency: "{{ 'sensor' + trigger_aio_prefix +'_grid_frequency' }}"
   trigger_crosscharge_threshold_aio_to_ac3: !input crosscharge_threshold_aio_to_ac3
   trigger_crosscharge_threshold_ac3_to_aio: !input crosscharge_threshold_ac3_to_aio
 
@@ -104,8 +107,11 @@ trigger:
     minutes: /5
     id: "time_trigger"
   - platform: template
-    value_template: "{{ states(trigger_aio_grid_voltage)|float(0) < 100 }}"
+    value_template: "{{ states(trigger_aio_grid_frequency)|float(0) < 1 }}"
     id: "grid_failure"
+  - platform: template
+    value_template: "{{ states(trigger_aio_grid_frequency)|float(0) > 1 }}"
+    id: "grid_restore"
   - platform: homeassistant
     event: start
     id: startup
@@ -137,7 +143,7 @@ action:
           Ensure balancer doesn't run if IO slot charging. But can run if IO is on, but finished charging
         enabled: true
       - condition: template
-        value_template: "{{ states(aio_grid_voltage)|float(0) > 100 }}"
+        value_template: "{{ states(aio_grid_frequency)|float(0) > 1 }}"
         alias: Test for OnGrid
       - condition: and
         conditions:
@@ -338,7 +344,7 @@ action:
       - delay:
           hours: 0
           minutes: 0
-          seconds: 2
+          seconds: 15
           milliseconds: 0
       - choose:
           - conditions:
@@ -488,13 +494,42 @@ action:
         alias: Wait 30 seconds in case the voltage drop was a blip
       - if:
           - condition: template
-            value_template: "{{ states(aio_grid_voltage)|float(0) < 100 }}"
+            value_template: "{{ states(aio_grid_frequency)|float(0) < 1 }}"
         then:
           - service: switch.turn_off
             data: {}
             target:
               entity_id: '{{ ac3_battery_power_mode }}'
-    alias: "Grid failure detected. Pause a bit, if it's still down then pause the AC3 for now. It'll resume when balancing resumes."
+          - delay:
+              hours: 0
+              minutes: 0
+              seconds: 30
+              milliseconds: 0
+          - service: switch.turn_off
+            data: {}
+            target:
+              entity_id: '{{ ac3_enable_charge_schedule }}'
+    alias: "Grid failure detected. Pause a bit, if it's still down then pause the AC3 for now and disable the scheduled charging. It'll resume when balancing resumes."
+
+  - if:
+      - condition: trigger
+        id:
+          - grid_restore
+    then:
+      - service: switch.turn_on
+        data: {}
+        target:
+          entity_id: '{{ ac3_battery_power_mode }}'
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 30
+          milliseconds: 0
+      - service: switch.turn_on
+        data: {}
+        target:
+          entity_id: '{{ ac3_enable_charge_schedule }}'
+    alias: "Grid power restored. Resume the AC3 for now and enable scheduled charging."
 
   - if:
       - condition: trigger
