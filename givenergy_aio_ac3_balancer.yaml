@@ -1,5 +1,5 @@
 blueprint:
-  name: Balance GivEnergy AIO and AC3 Inverters
+  name: Balance GivEnergy AIO and AC3 Inverters - DO NOT USE
   description: DO NOT USE THIS! It may damage your inverter and reduce its lifespan. This automation is for informaiton only. Any use is at your own risk. Balances a GivEnergy All-in-One and an AC3, when the AC3 is connected on the load side of the GivEnergy Gateway. This update 2024-05-13 (v51).
   domain: automation
   input:
