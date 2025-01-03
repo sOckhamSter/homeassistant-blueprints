@@ -1,0 +1,123 @@
+blueprint:
+  name: IOG GivEnergy Inverter Control v01
+  description: For GivEnergy battery owners with a single inverter on the Intelligent Octopus Go tariff. Charges your batteries when an IOG cheap slot is detected.
+  domain: automation
+  input:
+    octopus_intelligent_slot:
+      name: Octopus Intelligent Slot Active
+      description: A binary_sensor which is on if there is an active Octopus Intelligent slot actually charging the car right now. Use binary_sensor.octopus_energy_a_xxxxxxxx_intelligent_dispatching from the Octopus Energy integration by BottleCapDave or binary_sensor.octopus_intelligent_slot from the ha_octopus_intelligent integration by megakid
+      selector:
+        entity:
+          domain: binary_sensor
+    givtcp_enable_charge_schedule:
+      name: GivEnergy enable_charge_schedule entity
+      description: A switch entity from the GivTCP add-on ending in enable_charge_schedule
+      selector:
+        entity:
+          domain: switch
+
+variables:
+  givtcp_enable_charge_schedule: !input givtcp_enable_charge_schedule
+  givtcp_prefix: "{{ givtcp_enable_charge_schedule[6:-23] }}"
+  givtcp_charge_start_time_slot_1: "{{ 'select' + givtcp_prefix +'_charge_start_time_slot_1' }}"
+  givtcp_charge_end_time_slot_1: "{{ 'select' + givtcp_prefix +'_charge_end_time_slot_1' }}"
+
+
+trigger:
+  - alias: EV Charging started.
+    entity_id: !input octopus_intelligent_slot
+    from: "off"
+    to: "on"
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 30
+    id: EV_Charging
+    trigger: state
+  - alias: >-
+      Seconds delay to allow time for EV Charger to switch off at the end of
+      each half hour slot before testing it. ADJUST seconds as required.
+    minutes: /30
+    seconds: 30
+    id: Timed
+    trigger: time_pattern
+
+conditions: []
+
+actions:
+  - alias: Test whether EV is charging or not.
+    if:
+      - condition: state
+        entity_id: !input octopus_intelligent_slot
+        state: "on"
+        for:
+          hours: 0
+          minutes: 0
+          seconds: 30
+    then:
+      - alias: ensure that charge schedule is enabled.
+        if:
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input givtcp_enable_charge_schedule
+                state: "on"
+        then:
+          - action: switch.turn_on
+            target:
+              entity_id: !input givtcp_enable_charge_schedule
+            data: {}
+      - alias: set charge time slots to full time schedule.
+        if:
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: '{{ givtcp_charge_start_time_slot_1 }}'
+                state: "23:35:00"
+        then:
+          - action: select.select_option
+            target:
+              entity_id: '{{ givtcp_charge_start_time_slot_1 }}'
+            data:
+              option: "23:35:00"
+      - if:
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: '{{ givtcp_charge_end_time_slot_1 }}'
+                state: "23:34:00"
+        then:
+          - action: select.select_option
+            target:
+              entity_id: '{{ givtcp_charge_end_time_slot_1 }}'
+            data:
+              option: "23:34:00"
+    else:
+      - alias: reset charge time slots to normal night time schedule.
+        if:
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: '{{ givtcp_charge_start_time_slot_1 }}'
+                state: "23:35:00"
+        then:
+          - action: select.select_option
+            target:
+              entity_id: '{{ givtcp_charge_start_time_slot_1 }}'
+            data:
+              option: "23:35:00"
+      - if:
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: '{{ givtcp_charge_end_time_slot_1 }}'
+                state: "05:29:00"
+        then:
+          - action: select.select_option
+            target:
+              entity_id: '{{ givtcp_charge_end_time_slot_1 }}'
+            data:
+              option: "05:29:00"
+mode: restart
+trace:
+  stored_traces: 80
