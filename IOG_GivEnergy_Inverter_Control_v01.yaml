@@ -38,7 +38,7 @@ trigger:
       Seconds delay to allow time for EV Charger to switch off at the end of
       each half hour slot before testing it. ADJUST seconds as required.
     minutes: /30
-    seconds: 30
+    seconds: 60
     id: Timed
     trigger: time_pattern
 
@@ -111,13 +111,13 @@ actions:
             conditions:
               - condition: state
                 entity_id: '{{ givtcp_charge_end_time_slot_1 }}'
-                state: "05:29:00"
+                state: "05:28:00"
         then:
           - action: select.select_option
             target:
               entity_id: '{{ givtcp_charge_end_time_slot_1 }}'
             data:
-              option: "05:29:00"
+              option: "05:28:00"
 mode: restart
 trace:
   stored_traces: 80
