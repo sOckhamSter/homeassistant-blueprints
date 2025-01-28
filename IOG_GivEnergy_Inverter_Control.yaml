@@ -38,7 +38,7 @@ trigger:
       Seconds delay to allow time for EV Charger to switch off at the end of
       each half hour slot before testing it. ADJUST seconds as required.
     minutes: /30
-    seconds: 60
+    seconds: 59
     id: Timed
     trigger: time_pattern
 
