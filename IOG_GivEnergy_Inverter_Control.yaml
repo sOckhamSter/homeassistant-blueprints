@@ -22,7 +22,6 @@ variables:
   givtcp_charge_start_time_slot_1: "{{ 'select' + givtcp_prefix +'_charge_start_time_slot_1' }}"
   givtcp_charge_end_time_slot_1: "{{ 'select' + givtcp_prefix +'_charge_end_time_slot_1' }}"
 
-
 trigger:
   - alias: EV Charging started.
     entity_id: !input octopus_intelligent_slot
