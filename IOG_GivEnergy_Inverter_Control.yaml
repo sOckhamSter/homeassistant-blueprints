@@ -82,9 +82,8 @@ actions:
       - if:
           - condition: not
             conditions:
-              - condition: state
-                entity_id: '{{ givtcp_charge_end_time_slot_1 }}'
-                state: "23:34:00"
+              - condition: template
+                value_template: "{{ is_state(givtcp_charge_end_time_slot_1, '23:34:00') }}"
         then:
           - action: select.select_option
             target:
@@ -96,9 +95,8 @@ actions:
         if:
           - condition: not
             conditions:
-              - condition: state
-                entity_id: '{{ givtcp_charge_start_time_slot_1 }}'
-                state: "23:35:00"
+              - condition: template
+                value_template: "{{ is_state(givtcp_charge_start_time_slot_1, '23:35:00') }}"
         then:
           - action: select.select_option
             target:
@@ -108,9 +106,8 @@ actions:
       - if:
           - condition: not
             conditions:
-              - condition: state
-                entity_id: '{{ givtcp_charge_end_time_slot_1 }}'
-                state: "05:28:00"
+              - condition: template
+                value_template: "{{ is_state(givtcp_charge_end_time_slot_1, '05:28:00') }}"
         then:
           - action: select.select_option
             target:
