@@ -1,0 +1,194 @@
+blueprint:
+  name: Solar PV Forecast Comparison
+  description: Logs the values for chosen solar PV forecast entities each day along with the actual observed generation for that day in a specified CSV file and calculates the RMSE for each forecast against the actual generation. v13
+  domain: automation
+  input:
+    temp_text:
+      name: Temporary Text Helper
+      description: Create a helper of type 'text' (input_text) and choose it here. It will be used to store temporary data before writing to the CSV file.
+      selector:
+        entity:
+          domain: input_text
+    solar_forecast_comparison_rmse:
+      name: RMSE Output Helper
+      description: Create another helper of type 'text' (input_text) and choose it here. It will be used to store the rolling RMSE values for each forecast against the actual generation.
+      selector:
+        entity:
+          domain: input_text
+    output_file:
+      name: Output CSV File
+      description: Create a File output object with a CSV extension using the File integration and select it here as the location to save the output to.
+      selector:
+        entity:
+          domain: notify
+    solar_pv_generation_today:
+      name: Solar PV Generation Today (kWh)
+      description: An entity reporting the total solar PV generation for a day. The value must reset to zero at midnight. If you only have a cumulative sensor for this data, create a Utility Meter helper with daily cycle using the cumulative sensor as the source.
+      selector:
+        entity:
+          domain: sensor
+          device_class: energy
+    solar_forecasts:
+      name: Solar PV Forecasts
+      description: Select all of the solar forecast entities that you wish to record in the CSV file to compare against each other and the actual generation.
+      selector:
+        entity:
+          domain: sensor
+          multiple: true
+
+variables:
+  temp_text: !input temp_text
+  solar_pv_generation_today: !input solar_pv_generation_today
+  solar_forecast_comparison_rmse: !input solar_forecast_comparison_rmse
+  in_memory_text: ""
+  solar_forecasts: !input solar_forecasts
+
+triggers:
+  - trigger: time
+    at: "23:30:00"
+
+conditions: []
+actions:
+  - alias: If the temp helper is empty or unknown
+    if:
+      - condition: template
+        value_template: >-
+          {{
+          states(temp_text)|length == 0 or
+          states(temp_text) == "unknown"
+          }}
+    then:
+      - action: input_text.set_value
+        metadata: {}
+        data:
+          value: "{{ '1,' }}"
+        target:
+          entity_id: !input temp_text
+        alias: First time we have written to this so put a row number in
+      - repeat:
+          sequence:
+            - action: input_text.set_value
+              metadata: {}
+              data:
+                value: "{{ states(temp_text) + '0,' }}"
+              target:
+                entity_id: !input temp_text
+          for_each: !input solar_forecasts
+        alias: >-
+          For each forecast, fill in a zero for the running total squared
+          difference
+  - alias: >-
+      If the temp helper has data after the row number and totals, add the
+      generation and calculate squared differences then write to csv
+    if:
+      - condition: template
+        value_template: "{{ states(temp_text).split(',')[1+solar_forecasts|count]|length > 0 }}"
+    then:
+      - variables:
+          in_memory_text: "{{ states(temp_text).split(',') }}"
+      - action: input_text.set_value
+        metadata: {}
+        data:
+          value: "{{ in_memory_text[0] }}"
+        target:
+          entity_id: !input temp_text
+        alias: Write actual forecast to the temp helper
+      - repeat:
+          count: "{{ solar_forecasts|count }}"
+          sequence:
+            - action: input_text.set_value
+              metadata: {}
+              data:
+                value: >-
+                  {% set forecast_array_position = 1 + solar_forecasts|count + repeat.index %}
+                  {% set rmse = ((states(solar_pv_generation_today)|float(0) - (in_memory_text[forecast_array_position])|float(0))**2)|round(4) %}
+                  {{ states(temp_text) + "," + (rmse + in_memory_text[repeat.index]|float(0))|string }}
+              target:
+                entity_id: !input temp_text
+        alias: >-
+          For each forecast, calculate the RMSe to the actual generation, square
+          it and add it to the previously saved value to keep a running total
+      - action: input_text.set_value
+        metadata: {}
+        data:
+          value: >-
+            {% set startpos = solar_forecasts|count + 1 %}
+            {% set endpos = startpos + solar_forecasts|count + 1 %}
+            {{ states(temp_text) + "," + in_memory_text[startpos:endpos]|join(",") }}
+        target:
+          entity_id: !input temp_text
+        alias: Write the forecast date and forecasts to the helper
+      - action: input_text.set_value
+        metadata: {}
+        data:
+          value: >-
+            {{ states(temp_text) + "," + states(solar_pv_generation_today)
+            }}
+        target:
+          entity_id: !input temp_text
+        alias: Write actual forecast to the temp helper
+      - repeat:
+          count: "{{ solar_forecasts|count }}"
+          sequence:
+            - action: input_text.set_value
+              metadata: {}
+              data:
+                value: >-
+                  {% set recordcount = states(temp_text).split(",")[0]|int(0) %}
+                  {% set totalrunning = states(temp_text).split(",")[repeat.index]|float(0) %}
+                  {% set meanvalue = totalrunning / recordcount %}
+                  {% set rmse = meanvalue **0.5 %} {% set outputtext = "" %}
+                  {% if(repeat.index > 1) %}
+                  {% set outputtext = states(solar_forecast_comparison_rmse) + "  | " %}
+                  {% endif %}
+                  {% set outputtext = outputtext + "RMSE" + repeat.index|string + ": " + rmse|round(4)|string + "    " %}
+                  {{ outputtext }}
+              target:
+                entity_id: !input solar_forecast_comparison_rmse
+        alias: >-
+          Calculate RMSE for each forecast based on historical data and save to
+          RMSE output helper
+      - alias: Write temp data to csv file (tidied up)
+        action: notify.send_message
+        metadata: {}
+        data:
+          message: >-
+            {% set forecast_startpos = 2 + solar_forecasts|count %}
+            {% set generation_pos = forecast_startpos + solar_forecasts|count %}
+            {{ states(temp_text).split(',')[1+solar_forecasts|count] + ',' + states(temp_text).split(',')[forecast_startpos:forecast_startpos+solar_forecasts|count]|join(",") + "," + states(temp_text).split(',')[generation_pos] }}
+        target:
+          entity_id: !input output_file
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 10
+          milliseconds: 0
+      - action: input_text.set_value
+        metadata: {}
+        data:
+          value: >-
+            {{ (states(temp_text).split(",")[0]|int(0)+1)|string + "," +
+            states(temp_text).split(",")[1:solar_forecasts|count+1]|join(",") +
+            "," }}
+        target:
+          entity_id: !input temp_text
+  - alias: Save tomorrow's date to temp helper
+    action: input_text.set_value
+    metadata: {}
+    data:
+      value: >-
+        {{ states(temp_text) + ((as_timestamp(now())+ (86400)) |
+        timestamp_custom('%Y-%m-%d',true))|string }},
+    target:
+      entity_id: !input temp_text
+  - repeat:
+      sequence:
+        - action: input_text.set_value
+          metadata: {}
+          data:
+            value: "{{ states(temp_text) + states(repeat.item) }},"
+          target:
+            entity_id: !input temp_text
+      for_each: "{{ solar_forecasts|list }}"
+    alias: For each forecast, write value to the temp helper
+mode: single
