@@ -1,0 +1,125 @@
+blueprint:
+  name: IOG GivEnergy Inverter Control Simplified v01
+  description: For GivEnergy battery owners with a single inverter on the Intelligent
+    Octopus Go tariff. Charges your batteries when an IOG cheap slot is detected. Simplified Version.
+  domain: automation
+  input:
+    octopus_intelligent_slot:
+      name: Octopus Intelligent Slot Active
+      description: A binary_sensor which is on if there is an active Octopus Intelligent
+        slot actually charging the car right now. Use binary_sensor.octopus_energy_a_xxxxxxxx_intelligent_dispatching
+        from the Octopus Energy integration by BottleCapDave.
+      selector:
+        entity:
+          domain:
+          - binary_sensor
+          multiple: false
+    givtcp_enable_charge_schedule:
+      name: GivEnergy enable_charge_schedule entity
+      description: A switch entity from the GivTCP add-on ending in enable_charge_schedule
+      selector:
+        entity:
+          domain:
+          - switch
+          multiple: false
+  source_url: https://github.com/sOckhamSter/homeassistant-blueprints/blob/main/IOG_GivEnergy_Inverter_Control_Simplified.yaml
+variables:
+  givtcp_enable_charge_schedule: !input givtcp_enable_charge_schedule
+  givtcp_prefix: "{{ givtcp_enable_charge_schedule[6:-23] }}"
+  givtcp_charge_start_time_slot_1: "{{ 'select' + givtcp_prefix +'_charge_start_time_slot_1' }}"
+  givtcp_charge_end_time_slot_1: "{{ 'select' + givtcp_prefix +'_charge_end_time_slot_1' }}"
+triggers:
+  - alias: EV Charging started.
+    entity_id: !input octopus_intelligent_slot
+    from: "off"
+    to: "on"
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 10
+    id: EV_Charging_started
+    trigger: state
+  - alias: EV Charging ended.
+    entity_id: !input octopus_intelligent_slot
+    from: "on"
+    to: "off"
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 10
+    id: EV_Charging_ended
+    trigger: state
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id:
+              - EV_Charging_started
+        sequence:
+          - alias: ensure that charge schedule is enabled.
+            if:
+              - condition: not
+                conditions:
+                  - condition: state
+                    entity_id: !input givtcp_enable_charge_schedule
+                    state: "on"
+            then:
+              - action: switch.turn_on
+                target:
+                  entity_id: !input givtcp_enable_charge_schedule
+                data: {}
+          - alias: set charge time slots to full time schedule.
+            if:
+              - condition: not
+                conditions:
+                  - condition: template
+                    value_template: "{{ is_state(givtcp_charge_start_time_slot_1, '23:30:00') }}"
+            then:
+              - action: select.select_option
+                target:
+                  entity_id: "{{ givtcp_charge_start_time_slot_1 }}"
+                data:
+                  option: "23:30:00"
+          - if:
+              - condition: not
+                conditions:
+                  - condition: template
+                    value_template: "{{ is_state(givtcp_charge_end_time_slot_1, '23:29:00') }}"
+            then:
+              - action: select.select_option
+                target:
+                  entity_id: "{{ givtcp_charge_end_time_slot_1 }}"
+                data:
+                  option: "23:29:00"
+      - conditions:
+          - condition: trigger
+            id:
+              - EV_Charging_ended
+        sequence:
+          - alias: reset charge time slots to normal night time schedule.
+            if:
+              - condition: not
+                conditions:
+                  - condition: template
+                    value_template: "{{ is_state(givtcp_charge_start_time_slot_1, '23:30:00') }}"
+            then:
+              - action: select.select_option
+                target:
+                  entity_id: "{{ givtcp_charge_start_time_slot_1 }}"
+                data:
+                  option: "23:30:00"
+          - if:
+              - condition: not
+                conditions:
+                  - condition: template
+                    value_template: "{{ is_state(givtcp_charge_end_time_slot_1, '05:30:00') }}"
+            then:
+              - action: select.select_option
+                target:
+                  entity_id: "{{ givtcp_charge_end_time_slot_1 }}"
+                data:
+                  option: "05:30:00"
+mode: restart
+trace:
+  stored_traces: 80
